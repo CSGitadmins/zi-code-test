@@ -1,12 +1,30 @@
 <!DOCTYPE html>
+<!--
+  ZIP Code Finder
+  ----------------
+  Single-page web app that looks up U.S. ZIP codes by city + state.
+  Calls the Zippopotam.us public API directly from the browser
+  (no backend, no API key, no build step).
+
+  Endpoint used:
+    GET https://api.zippopotam.us/us/{state}/{city}
+  Response shape:
+    { "place name": "...", "state": "...",
+      "places": [ { "post code": "...", "place name": "...",
+                    "latitude": "...", "longitude": "..." }, ... ] }
+-->
 <html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>ZIP Code Finder</title>
+
   <style>
+    /* ---------- Base / reset ---------- */
     :root { color-scheme: dark; }
     * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    /* Page background: dark radial gradient, fixed so it doesn't scroll */
     body {
       min-height: 100vh;
       display: grid;
@@ -17,7 +35,11 @@
       background-attachment: fixed;
       color: #e8ecff;
     }
+
+    /* ---------- Layout containers ---------- */
     .wrap { width: 100%; max-width: 640px; }
+
+    /* The frosted-glass card that holds the form + results */
     .card {
       padding: 2.5rem 2rem;
       border: 1px solid rgba(120, 140, 255, 0.18);
@@ -26,29 +48,46 @@
       backdrop-filter: blur(8px);
       box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
     }
+
+    /* ---------- Typography ---------- */
     h1 { font-size: clamp(1.6rem, 4vw, 2.4rem); letter-spacing: -0.02em; margin-bottom: 0.4rem; }
     .sub { color: #9aa3c7; line-height: 1.6; margin-bottom: 1.75rem; font-size: 0.9rem; }
+
+    /* ---------- Form ---------- */
+    /* Two columns: city stretches, state is a fixed 130px slot */
     form { display: grid; grid-template-columns: 1fr 130px; gap: 0.75rem; align-items: end; }
+
     label { display: block; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.08em;
       color: #6b73a0; margin-bottom: 0.4rem; }
+
+    /* Shared field styling for input, select, and button */
     input, select, button {
       font: inherit; width: 100%; padding: 0.7rem 0.85rem; border-radius: 10px;
       border: 1px solid rgba(120, 140, 255, 0.22); background: rgba(10, 12, 24, 0.7);
       color: #e8ecff; outline: none; transition: border-color 0.15s, box-shadow 0.15s;
     }
     input:focus, select:focus { border-color: #8db4ff; box-shadow: 0 0 0 3px rgba(120,140,255,0.18); }
+
+    /* Submit button spans the full grid row */
     button {
       grid-column: 1 / -1; cursor: pointer; font-weight: 600; color: #0a0c18;
       background: linear-gradient(180deg, #aecbff, #6f9bff); border: none; margin-top: 0.25rem;
     }
     button:hover { filter: brightness(1.08); }
     button:disabled { opacity: 0.55; cursor: progress; }
+
+    /* ---------- Status line (shows spinner / errors) ---------- */
+    /* min-height keeps layout stable when the message is empty */
     .status { margin-top: 1.5rem; font-size: 0.9rem; color: #9aa3c7; min-height: 1.2em; }
     .status.error { color: #ff9a9a; }
+
+    /* ---------- Results ---------- */
     .results { margin-top: 1.5rem; display: none; }
     .results.show { display: block; }
     .results h2 { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.08em;
       color: #6b73a0; margin-bottom: 0.9rem; font-weight: 600; }
+
+    /* Wrapping row of clickable ZIP "chips" */
     .zips { display: flex; flex-wrap: wrap; gap: 0.6rem; }
     .zip {
       padding: 0.55rem 0.9rem; border-radius: 10px; font-size: 1.05rem; font-weight: 600;
@@ -56,14 +95,20 @@
       cursor: pointer; transition: background 0.15s, transform 0.1s; position: relative;
     }
     .zip:hover { background: rgba(120,140,255,0.22); }
-    .zip:active { transform: scale(0.96); }
+    .zip:active { transform: scale(0.96); } /* tiny press animation on click */
     .zip .place { display: block; font-size: 0.68rem; font-weight: 400; color: #8089b5; margin-top: 0.15rem; }
+
+    /* ---------- "Copied!" toast (shown after clipboard write) ---------- */
     .copied { position: fixed; bottom: 2rem; left: 50%; transform: translateX(-50%);
       background: #4ade80; color: #06210f; padding: 0.5rem 1rem; border-radius: 999px;
       font-size: 0.8rem; font-weight: 600; opacity: 0; transition: opacity 0.2s; pointer-events: none; }
     .copied.show { opacity: 1; }
+
+    /* ---------- Footer meta ---------- */
     .meta { margin-top: 1.75rem; font-size: 0.72rem; color: #6b73a0; line-height: 1.6; }
     .meta a { color: #8db4ff; }
+
+    /* ---------- Loading spinner (inline, used inside status line) ---------- */
     .spinner { display: inline-block; width: 0.9em; height: 0.9em; vertical-align: -0.1em;
       border: 2px solid rgba(120,140,255,0.3); border-top-color: #8db4ff; border-radius: 50%;
       animation: spin 0.7s linear infinite; margin-right: 0.4em; }
@@ -71,10 +116,13 @@
   </style>
 </head>
 <body>
+  <!-- Main app card: title, form, status line, results grid, footer -->
   <main class="wrap">
     <div class="card">
       <h1>ZIP Code Finder</h1>
       <p class="sub">Enter a U.S. city and state to look up its ZIP codes. Click any result to copy it.</p>
+
+      <!-- Lookup form: city text input + state dropdown + submit button -->
       <form id="form">
         <div>
           <label for="city">City</label>
@@ -82,24 +130,36 @@
         </div>
         <div>
           <label for="state">State</label>
+          <!-- Options injected by JS from the STATES array below -->
           <select id="state" name="state" required></select>
         </div>
         <button id="submit" type="submit">Find ZIP Codes</button>
       </form>
+
+      <!-- Status line: loading spinner while fetching, error text on failure -->
       <div id="status" class="status"></div>
+
+      <!-- Results panel: hidden until a successful lookup populates it -->
       <div id="results" class="results">
         <h2 id="results-title"></h2>
         <div id="zips" class="zips"></div>
       </div>
+
       <p class="meta">
         Data from <a href="https://www.zippopotam.us/" target="_blank" rel="noopener">Zippopotam.us</a>
         &middot; served via Nginx on localhost
       </p>
     </div>
   </main>
+
+  <!-- Floating toast shown briefly after a ZIP is copied to the clipboard -->
   <div id="copied" class="copied">Copied!</div>
 
   <script>
+    // ---------------------------------------------------------------
+    // U.S. states + DC. Two-letter abbreviation is what the API expects
+    // in the URL path; full name is shown to the user in the dropdown.
+    // ---------------------------------------------------------------
     const STATES = [
       ["AL","Alabama"],["AK","Alaska"],["AZ","Arizona"],["AR","Arkansas"],["CA","California"],
       ["CO","Colorado"],["CT","Connecticut"],["DE","Delaware"],["DC","District of Columbia"],
@@ -114,6 +174,7 @@
       ["WA","Washington"],["WV","West Virginia"],["WI","Wisconsin"],["WY","Wyoming"]
     ];
 
+    // Populate the <select> dropdown from the STATES array, then default to TX.
     const stateSel = document.getElementById("state");
     STATES.forEach(([abbr, name]) => {
       const o = document.createElement("option");
@@ -122,6 +183,9 @@
     });
     stateSel.value = "TX";
 
+    // ---------------------------------------------------------------
+    // Cache DOM references once (avoids repeated getElementById calls)
+    // ---------------------------------------------------------------
     const form = document.getElementById("form");
     const cityInput = document.getElementById("city");
     const submitBtn = document.getElementById("submit");
@@ -131,39 +195,60 @@
     const zipsEl = document.getElementById("zips");
     const copiedEl = document.getElementById("copied");
 
+    // ---------------------------------------------------------------
+    // Small helpers
+    // ---------------------------------------------------------------
+
+    // Write a message to the status line. innerHTML is used so the
+    // spinner <span> can be rendered as part of the loading message.
     function setStatus(html, isError) {
       statusEl.innerHTML = html;
       statusEl.classList.toggle("error", !!isError);
     }
 
+    // Briefly show the "Copied!" toast, auto-hiding after 1.2s.
+    // A timer is stashed on the function itself so repeated copies
+    // reset the timer instead of stacking.
     function showCopied() {
       copiedEl.classList.add("show");
       clearTimeout(showCopied._t);
       showCopied._t = setTimeout(() => copiedEl.classList.remove("show"), 1200);
     }
 
+    // Copy a ZIP code string to the clipboard. Clipboard API can throw
+    // (e.g. insecure context, no permission) — silently ignore failure.
     async function copyZip(code) {
       try { await navigator.clipboard.writeText(code); showCopied(); } catch (_) {}
     }
 
+    // ---------------------------------------------------------------
+    // Form submission: fetch ZIP codes for the entered city + state
+    // and render them as clickable chips.
+    // ---------------------------------------------------------------
     form.addEventListener("submit", async (e) => {
-      e.preventDefault();
+      e.preventDefault(); // stop the browser's native form submit / page reload
+
       const city = cityInput.value.trim();
       const state = stateSel.value;
-      if (!city) return;
+      if (!city) return; // nothing to look up
 
+      // Reset UI: hide any previous results, lock the button, show spinner.
       resultsEl.classList.remove("show");
       submitBtn.disabled = true;
       setStatus('<span class="spinner"></span>Searching ' + city + ', ' + state + '…', false);
 
       try {
+        // Build the API URL. encodeURIComponent handles cities with spaces
+        // or punctuation (e.g. "Saint Louis", "O'Fallon").
         const url = "https://api.zippopotam.us/us/" + state.toLowerCase() + "/" + encodeURIComponent(city);
         const res = await fetch(url);
 
+        // The API returns 404 when the city/state combo has no matches.
         if (res.status === 404) {
           setStatus('No ZIP codes found for "' + city + ', ' + state + '". Check the spelling and try again.', true);
           return;
         }
+        // Any other non-2xx is treated as a service error.
         if (!res.ok) {
           setStatus('Lookup failed (HTTP ' + res.status + '). Please try again.', true);
           return;
@@ -172,21 +257,26 @@
         const data = await res.json();
         const places = data.places || [];
         if (!places.length) {
+          // Shouldn't normally happen on a 200, but guard anyway.
           setStatus('No ZIP codes found for "' + city + ', ' + state + '".', true);
           return;
         }
 
-        // De-duplicate by post code
+        // The API sometimes returns the same ZIP twice (different lat/lng
+        // entries pointing at the same post code). Collapse those.
         const seen = new Set();
         const unique = places.filter(p => {
           if (seen.has(p["post code"])) return false;
           seen.add(p["post code"]); return true;
         });
 
+        // Render: clear the status line and fill the results panel.
         setStatus("");
         resultsTitle.textContent = unique.length + " ZIP code" + (unique.length === 1 ? "" : "s") +
           " for " + data["place name"] + ", " + data["state"];
         zipsEl.innerHTML = "";
+
+        // Build one clickable chip per unique ZIP.
         unique.forEach(p => {
           const div = document.createElement("div");
           div.className = "zip";
@@ -198,9 +288,11 @@
         });
         resultsEl.classList.add("show");
       } catch (err) {
+        // Network-level failure (DNS, offline, CORS preflight, etc.)
         setStatus("Network error — could not reach the ZIP code service. " +
           "Check your connection and try again.", true);
       } finally {
+        // Always re-enable the button, even if the request failed.
         submitBtn.disabled = false;
       }
     });
