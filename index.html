@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ZIP Code Finder</title>
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      min-height: 100vh;
+      display: grid;
+      place-items: start center;
+      padding: 4rem 1rem;
+      font-family: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+      background: radial-gradient(120% 120% at 50% 0%, #1a1f3a 0%, #0a0c18 55%, #050610 100%);
+      background-attachment: fixed;
+      color: #e8ecff;
+    }
+    .wrap { width: 100%; max-width: 640px; }
+    .card {
+      padding: 2.5rem 2rem;
+      border: 1px solid rgba(120, 140, 255, 0.18);
+      border-radius: 16px;
+      background: rgba(20, 24, 48, 0.55);
+      backdrop-filter: blur(8px);
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
+    }
+    h1 { font-size: clamp(1.6rem, 4vw, 2.4rem); letter-spacing: -0.02em; margin-bottom: 0.4rem; }
+    .sub { color: #9aa3c7; line-height: 1.6; margin-bottom: 1.75rem; font-size: 0.9rem; }
+    form { display: grid; grid-template-columns: 1fr 130px; gap: 0.75rem; align-items: end; }
+    label { display: block; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.08em;
+      color: #6b73a0; margin-bottom: 0.4rem; }
+    input, select, button {
+      font: inherit; width: 100%; padding: 0.7rem 0.85rem; border-radius: 10px;
+      border: 1px solid rgba(120, 140, 255, 0.22); background: rgba(10, 12, 24, 0.7);
+      color: #e8ecff; outline: none; transition: border-color 0.15s, box-shadow 0.15s;
+    }
+    input:focus, select:focus { border-color: #8db4ff; box-shadow: 0 0 0 3px rgba(120,140,255,0.18); }
+    button {
+      grid-column: 1 / -1; cursor: pointer; font-weight: 600; color: #0a0c18;
+      background: linear-gradient(180deg, #aecbff, #6f9bff); border: none; margin-top: 0.25rem;
+    }
+    button:hover { filter: brightness(1.08); }
+    button:disabled { opacity: 0.55; cursor: progress; }
+    .status { margin-top: 1.5rem; font-size: 0.9rem; color: #9aa3c7; min-height: 1.2em; }
+    .status.error { color: #ff9a9a; }
+    .results { margin-top: 1.5rem; display: none; }
+    .results.show { display: block; }
+    .results h2 { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.08em;
+      color: #6b73a0; margin-bottom: 0.9rem; font-weight: 600; }
+    .zips { display: flex; flex-wrap: wrap; gap: 0.6rem; }
+    .zip {
+      padding: 0.55rem 0.9rem; border-radius: 10px; font-size: 1.05rem; font-weight: 600;
+      background: rgba(120,140,255,0.12); border: 1px solid rgba(120,140,255,0.22); color: #cdd8ff;
+      cursor: pointer; transition: background 0.15s, transform 0.1s; position: relative;
+    }
+    .zip:hover { background: rgba(120,140,255,0.22); }
+    .zip:active { transform: scale(0.96); }
+    .zip .place { display: block; font-size: 0.68rem; font-weight: 400; color: #8089b5; margin-top: 0.15rem; }
+    .copied { position: fixed; bottom: 2rem; left: 50%; transform: translateX(-50%);
+      background: #4ade80; color: #06210f; padding: 0.5rem 1rem; border-radius: 999px;
+      font-size: 0.8rem; font-weight: 600; opacity: 0; transition: opacity 0.2s; pointer-events: none; }
+    .copied.show { opacity: 1; }
+    .meta { margin-top: 1.75rem; font-size: 0.72rem; color: #6b73a0; line-height: 1.6; }
+    .meta a { color: #8db4ff; }
+    .spinner { display: inline-block; width: 0.9em; height: 0.9em; vertical-align: -0.1em;
+      border: 2px solid rgba(120,140,255,0.3); border-top-color: #8db4ff; border-radius: 50%;
+      animation: spin 0.7s linear infinite; margin-right: 0.4em; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+  <main class="wrap">
+    <div class="card">
+      <h1>ZIP Code Finder</h1>
+      <p class="sub">Enter a U.S. city and state to look up its ZIP codes. Click any result to copy it.</p>
+      <form id="form">
+        <div>
+          <label for="city">City</label>
+          <input id="city" name="city" type="text" placeholder="e.g. Austin" autocomplete="address-level2" required />
+        </div>
+        <div>
+          <label for="state">State</label>
+          <select id="state" name="state" required></select>
+        </div>
+        <button id="submit" type="submit">Find ZIP Codes</button>
+      </form>
+      <div id="status" class="status"></div>
+      <div id="results" class="results">
+        <h2 id="results-title"></h2>
+        <div id="zips" class="zips"></div>
+      </div>
+      <p class="meta">
+        Data from <a href="https://www.zippopotam.us/" target="_blank" rel="noopener">Zippopotam.us</a>
+        &middot; served via Nginx on localhost
+      </p>
+    </div>
+  </main>
+  <div id="copied" class="copied">Copied!</div>
+
+  <script>
+    const STATES = [
+      ["AL","Alabama"],["AK","Alaska"],["AZ","Arizona"],["AR","Arkansas"],["CA","California"],
+      ["CO","Colorado"],["CT","Connecticut"],["DE","Delaware"],["DC","District of Columbia"],
+      ["FL","Florida"],["GA","Georgia"],["HI","Hawaii"],["ID","Idaho"],["IL","Illinois"],
+      ["IN","Indiana"],["IA","Iowa"],["KS","Kansas"],["KY","Kentucky"],["LA","Louisiana"],
+      ["ME","Maine"],["MD","Maryland"],["MA","Massachusetts"],["MI","Michigan"],["MN","Minnesota"],
+      ["MS","Mississippi"],["MO","Missouri"],["MT","Montana"],["NE","Nebraska"],["NV","Nevada"],
+      ["NH","New Hampshire"],["NJ","New Jersey"],["NM","New Mexico"],["NY","New York"],
+      ["NC","North Carolina"],["ND","North Dakota"],["OH","Ohio"],["OK","Oklahoma"],["OR","Oregon"],
+      ["PA","Pennsylvania"],["RI","Rhode Island"],["SC","South Carolina"],["SD","South Dakota"],
+      ["TN","Tennessee"],["TX","Texas"],["UT","Utah"],["VT","Vermont"],["VA","Virginia"],
+      ["WA","Washington"],["WV","West Virginia"],["WI","Wisconsin"],["WY","Wyoming"]
+    ];
+
+    const stateSel = document.getElementById("state");
+    STATES.forEach(([abbr, name]) => {
+      const o = document.createElement("option");
+      o.value = abbr; o.textContent = name;
+      stateSel.appendChild(o);
+    });
+    stateSel.value = "TX";
+
+    const form = document.getElementById("form");
+    const cityInput = document.getElementById("city");
+    const submitBtn = document.getElementById("submit");
+    const statusEl = document.getElementById("status");
+    const resultsEl = document.getElementById("results");
+    const resultsTitle = document.getElementById("results-title");
+    const zipsEl = document.getElementById("zips");
+    const copiedEl = document.getElementById("copied");
+
+    function setStatus(html, isError) {
+      statusEl.innerHTML = html;
+      statusEl.classList.toggle("error", !!isError);
+    }
+
+    function showCopied() {
+      copiedEl.classList.add("show");
+      clearTimeout(showCopied._t);
+      showCopied._t = setTimeout(() => copiedEl.classList.remove("show"), 1200);
+    }
+
+    async function copyZip(code) {
+      try { await navigator.clipboard.writeText(code); showCopied(); } catch (_) {}
+    }
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const city = cityInput.value.trim();
+      const state = stateSel.value;
+      if (!city) return;
+
+      resultsEl.classList.remove("show");
+      submitBtn.disabled = true;
+      setStatus('<span class="spinner"></span>Searching ' + city + ', ' + state + '…', false);
+
+      try {
+        const url = "https://api.zippopotam.us/us/" + state.toLowerCase() + "/" + encodeURIComponent(city);
+        const res = await fetch(url);
+
+        if (res.status === 404) {
+          setStatus('No ZIP codes found for "' + city + ', ' + state + '". Check the spelling and try again.', true);
+          return;
+        }
+        if (!res.ok) {
+          setStatus('Lookup failed (HTTP ' + res.status + '). Please try again.', true);
+          return;
+        }
+
+        const data = await res.json();
+        const places = data.places || [];
+        if (!places.length) {
+          setStatus('No ZIP codes found for "' + city + ', ' + state + '".', true);
+          return;
+        }
+
+        // De-duplicate by post code
+        const seen = new Set();
+        const unique = places.filter(p => {
+          if (seen.has(p["post code"])) return false;
+          seen.add(p["post code"]); return true;
+        });
+
+        setStatus("");
+        resultsTitle.textContent = unique.length + " ZIP code" + (unique.length === 1 ? "" : "s") +
+          " for " + data["place name"] + ", " + data["state"];
+        zipsEl.innerHTML = "";
+        unique.forEach(p => {
+          const div = document.createElement("div");
+          div.className = "zip";
+          div.title = "Click to copy " + p["post code"];
+          div.innerHTML = p["post code"] +
+            '<span class="place">' + p["place name"] + '</span>';
+          div.addEventListener("click", () => copyZip(p["post code"]));
+          zipsEl.appendChild(div);
+        });
+        resultsEl.classList.add("show");
+      } catch (err) {
+        setStatus("Network error — could not reach the ZIP code service. " +
+          "Check your connection and try again.", true);
+      } finally {
+        submitBtn.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>
